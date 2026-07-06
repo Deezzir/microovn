@@ -26,8 +26,15 @@ type network struct {
 	Version          int                        `yaml:"version"`
 	VirtualEthernets map[string]virtualEthernet `yaml:"virtual-ethernets,omitempty"`
 	Vrfs             map[string]vrf             `yaml:"vrfs,omitempty"`
+	Dummy            map[string]dummy           `yaml:"dummy-devices,omitempty"`
 	Bridges          map[string]bridge          `yaml:"bridges,omitempty"`
 	OpenvSwitch      *openvSwitch               `yaml:"openvswitch,omitempty"`
+}
+
+type dummy struct {
+	MacAddress string   `yaml:"macaddress,omitempty"`
+	AcceptRa   bool     `yaml:"accept-ra"`
+	LinkLocal  []string `yaml:"link-local,omitempty"`
 }
 
 // VirtualEthernet is a struct for defining virtual ethernets
@@ -62,10 +69,20 @@ func NewConfig() *Config {
 		Network: network{
 			Version:          supportedVersion,
 			VirtualEthernets: make(map[string]virtualEthernet),
+			Dummy:            make(map[string]dummy),
 			Vrfs:             make(map[string]vrf),
 			Bridges:          make(map[string]bridge),
 			OpenvSwitch:      &openvSwitch{ExternalIDs: make(map[string]string)},
 		},
+	}
+}
+
+// AddDummy adds a dummy interface to the config.
+func (c *Config) AddDummy(iface string, mac string, acceptRa bool, linkLocal []string) {
+	c.Network.Dummy[iface] = dummy{
+		MacAddress: mac,
+		AcceptRa:   acceptRa,
+		LinkLocal:  linkLocal,
 	}
 }
 
