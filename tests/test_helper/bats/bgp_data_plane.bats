@@ -51,29 +51,29 @@ function ping_ovn_int_network_over_bgp_router() {
 network:
     version: 2
     virtual-ethernets:
-        veth1-bgp:
-            peer: veth1-brg
-            macaddress: 02:90:b1:a2:e6:28
+        vbr-eth1-bgp:
+            peer: vbr-eth1-brg
+            macaddress: 02:de:8d:e4:ef:1d
             accept-ra: false
             link-local:
                 - ipv6
-        veth1-brg:
-            peer: veth1-bgp
+        vbr-eth1-brg:
+            peer: vbr-eth1-bgp
             accept-ra: false
     vrfs:
         ovnvrf10:
             table: "10"
             interfaces:
-                - veth1-bgp
+                - vbr-eth1-bgp
     bridges:
         br-int:
             openvswitch:
                 fail-mode: secure
             interfaces:
-                - veth1-brg
+                - vbr-eth1-brg
     openvswitch:
         external-ids:
-            dynamic-routing-port-mapping: veth1-bgp=veth1-bgp
+            dynamic-routing-port-mapping: vbr-eth1-bgp=vbr-eth1-bgp
 EOF
 )
     assert_output "$expected"
@@ -148,10 +148,10 @@ EOF
 
     # XXX potential bug?
     echo "# ($BGP_PEER) Ensure OVN performs ND for its default gateway" >&3
-    lxc_exec "$BGP_PEER" "ping -W 1 -c 3 fe80::90:b1ff:fea2:e628%eth1 || true"
+    lxc_exec "$BGP_PEER" "ping -W 1 -c 3 fe80::de:8dff:fee4:ef1d%eth1 || true"
 
     echo "# Wait for Mac_Binding to be populated for the LRs default gateway" >&3
-    wait_until "microovn_mac_binding_exists $TEST_CONTAINER $neighbor_address lrp-microovn-bgp-data-plane-1-eth1"
+    wait_until "microovn_mac_binding_exists $TEST_CONTAINER $neighbor_address lrp-microovn-bgp-data-plane-1-br-eth1"
 
     # Check that external host can reach NAT address
     echo "# ($EXT_HOST) Reach NAT address $nat_ext_ip with ping" >&3

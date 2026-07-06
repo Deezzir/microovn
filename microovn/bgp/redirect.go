@@ -284,17 +284,18 @@ func findAvailableVrfTableID(ctx context.Context, s state.State) (string, error)
 	return "", fmt.Errorf("failed to find an available VRF table ID")
 }
 
-// createExternalBridges sets up OVS bridge for each external connection defined in "extConnections" argument.
-// Physical interface defined in the external connection will be plugged to this bridge and the bridge will
-// be named "<iface>-br". Additionally, a physical network name will be constructed with getPhysnetName() and
+// createExternalBridges sets up OVS bridge for each external connection in "bridges".
+// Physical interface defined in "bridges" will be plugged to this bridge and the bridge will
+// be named "br-<iface>". Additionally, a physical network name will be constructed with getPhysnetName() and
 // will be added to "ovn-bridge-mappings" in the OVS database.
-func createExternalBridges(ctx context.Context, s state.State, extConnections []types.BgpExternalConnection) error {
-	for _, extConnection := range extConnections {
+func createExternalBridges(ctx context.Context, s state.State, bridges []types.BgpExternalConnection) ([]types.BgpBridge, error) {
+	result := make([]types.BgpBridge, 0)
+	for _, extConnection := range bridges {
 		bridgeName := fmt.Sprintf("br-%s", extConnection.Iface)
-		physnet := getPhysnetName(s, extConnection.Iface)
+		physnet := getPhysnetName(s, bridgeName)
 		bridgeMap, err := vsctlGetIfExists(ctx, s, "Open_vSwitch", ".", "external-ids", "ovn-bridge-mappings")
 		if err != nil {
-			return fmt.Errorf("failed to lookup ovn-bridge-mappings: %v", err)
+			return nil, fmt.Errorf("failed to lookup ovn-bridge-mappings: %v", err)
 		}
 		if bridgeMap == "" {
 			bridgeMap = fmt.Sprintf("%s:%s", physnet, bridgeName)
@@ -303,6 +304,9 @@ func createExternalBridges(ctx context.Context, s state.State, extConnections []
 
 		}
 
+		result = append(result, types.BgpBridge{
+			Bridge: bridgeName,
+		})
 		_, err = ovnCmd.VSCtl(ctx, s,
 			"--",
 			"add-br", bridgeName,
@@ -316,56 +320,43 @@ func createExternalBridges(ctx context.Context, s state.State, extConnections []
 		)
 		if err != nil {
 			logger.Errorf("failed to create external bridge for interface '%s': %v", extConnection.Iface, err)
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return result, nil
 }
 
-func createBridgeNetworks(ctx context.Context, s state.State, bridges []types.BgpBridge) ([]types.BgpExternalConnection, error) {
-	extConnections := make([]types.BgpExternalConnection, 0)
+func createBridgeNetworks(ctx context.Context, s state.State, bridges []types.BgpBridge) ([]types.BgpBridge, error) {
 	bridgeMap, err := vsctlGetIfExists(ctx, s, "Open_vSwitch", ".", "external-ids", "ovn-bridge-mappings")
 	if err != nil {
 		return nil, fmt.Errorf("failed to lookup ovn-bridge-mappings: %v", err)
 	}
 	for _, bridge := range bridges {
-		ifaceName := fmt.Sprintf("%s%s", bridge.Bridge, "beth0")
-		physnet := getPhysnetName(s, ifaceName)
+		physnet := getPhysnetName(s, bridge.Bridge)
 		if bridgeMap == "" {
 			bridgeMap = fmt.Sprintf("%s:%s", physnet, bridge.Bridge)
 		} else {
 			bridgeMap = fmt.Sprintf("%s,%s:%s", bridgeMap, physnet, bridge.Bridge)
 		}
 
-		extConnections = append(extConnections, types.BgpExternalConnection{
-			Iface: ifaceName,
-		})
 		_, err := ovnCmd.VSCtl(ctx, s,
 			"--",
 			"set", "bridge", bridge.Bridge, fmt.Sprintf("external-ids:%s=true", BgpManagedTag),
 			"--",
-			"add-port", bridge.Bridge, ifaceName,
-			"--",
 			"set", "Open_vSwitch", ".", fmt.Sprintf("external-ids:ovn-bridge-mappings=\"%s\"", bridgeMap),
 			fmt.Sprintf("external-ids:%s=\"%s\"", BgpBridgeMapping, bridgeMap),
-			"--",
-			"set", "Interface", ifaceName, "type=internal",
 		)
 		if err != nil {
 			return nil, err
 		}
-		_, err = shared.RunCommandContext(ctx, "ip", "link", "set", "dev", ifaceName, "up")
-		if err != nil {
-			return nil, err
-		}
 	}
-	return extConnections, nil
+	return bridges, nil
 }
 
 // createExternalNetworks creates a single Logical Router and connects it to each external network defined
-// in "extConnections" argument. The connection is facilitated via Logical switches, each external network
+// in "bridges" argument. The connection is facilitated via Logical switches, each external network
 // is represented by its own switch.
-func createExternalNetworks(ctx context.Context, s state.State, extConnections []types.BgpExternalConnection) error {
+func createExternalNetworks(ctx context.Context, s state.State, bridges []types.BgpBridge) error {
 	// Create Logical Router
 	lrName := getLrName(s)
 	_, err := ovnCmd.NBCtlCluster(ctx,
@@ -381,14 +372,14 @@ func createExternalNetworks(ctx context.Context, s state.State, extConnections [
 		logger.Errorf("Failed to create OVN Logical Router for external connectivity: %v", err)
 		return err
 	}
-	for _, extConnection := range extConnections {
-		lsName := getLsName(s, extConnection.Iface)
-		lspName := fmt.Sprintf("lsp-%s-%s", s.Name(), extConnection.Iface)
+	for _, brg := range bridges {
+		lsName := getLsName(s, brg.Bridge)
+		lspName := fmt.Sprintf("lsp-%s-%s", s.Name(), brg.Bridge)
 
-		patchName := fmt.Sprintf("patch-%s-%s", s.Name(), extConnection.Iface)
-		physnetName := getPhysnetName(s, extConnection.Iface)
+		patchName := fmt.Sprintf("patch-%s-%s", s.Name(), brg.Bridge)
+		physnetName := getPhysnetName(s, brg.Bridge)
 
-		lrpName := getLrpName(s, extConnection.Iface)
+		lrpName := getLrpName(s, brg.Bridge)
 		lrpMac := generateLrpMac(lrpName)
 
 		_, err = ovnCmd.NBCtlCluster(ctx,
@@ -421,7 +412,7 @@ func createExternalNetworks(ctx context.Context, s state.State, extConnections [
 		)
 
 		if err != nil {
-			logger.Errorf("failed to create external networks for interface '%s': %v", extConnection.Iface, err)
+			logger.Errorf("failed to create external networks for bridge '%s': %v", brg.Bridge, err)
 			return err
 		}
 	}
@@ -429,9 +420,9 @@ func createExternalNetworks(ctx context.Context, s state.State, extConnections [
 }
 
 // createVrf instructs OVN to set up VRF to redistribute NAT and Load Balancer addresses for each Logical Router Port
-// that's associated with external connections defined in "extConnections" argument. Only one VRF is set up with table
+// that's associated with bridges in "bridges" argument. Only one VRF is set up with table
 // ID specified by "tableID" argument. All LRPs redistribute their addresses to this VRF.
-func createVrf(ctx context.Context, s state.State, extConnections []types.BgpExternalConnection, tableID string) error {
+func createVrf(ctx context.Context, s state.State, bridges []types.BgpBridge, tableID string) error {
 	lrName := getLrName(s)
 
 	// Check if the VRF kernel module is loaded
@@ -449,15 +440,15 @@ func createVrf(ctx context.Context, s state.State, extConnections []types.BgpExt
 		return fmt.Errorf("failed to create vrf for LR '%s': %v", lrName, err)
 	}
 
-	for _, extConnection := range extConnections {
-		lrpName := getLrpName(s, extConnection.Iface)
+	for _, brg := range bridges {
+		lrpName := getLrpName(s, brg.Bridge)
 		_, err = ovnCmd.NBCtlCluster(ctx,
 			s,
 			"lrp-set-options", lrpName,
 			"dynamic-routing-maintain-vrf=true",
 			"dynamic-routing-redistribute=nat,lb",
 			fmt.Sprintf("dynamic-routing-port-name=%s",
-				getBgpRedirectIfaceName(extConnection.Iface)),
+				getBgpRedirectIfaceName(brg.Bridge)),
 		)
 		if err != nil {
 			return fmt.Errorf("failed to enable vrf for LRP '%s': %v", lrpName, err)
@@ -466,7 +457,7 @@ func createVrf(ctx context.Context, s state.State, extConnections []types.BgpExt
 	return nil
 }
 
-func generateVeth(ctx context.Context, s state.State, extConnections []types.BgpExternalConnection, tableID string) error {
+func generateVeth(ctx context.Context, s state.State, bridges []types.BgpBridge, tableID string) error {
 
 	vrfName := getVrfName(tableID)
 
@@ -480,10 +471,10 @@ func generateVeth(ctx context.Context, s state.State, extConnections []types.Bgp
 	vrfInterfaces := []string{}
 	var drPortMapping strings.Builder
 
-	for _, extConnection := range extConnections {
-		bgpInterface := getBgpRedirectIfaceName(extConnection.Iface)
-		brgInterface := getBgpRedirectIfacePeerName(extConnection.Iface)
-		mac := generateLrpMac(getLrpName(s, extConnection.Iface))
+	for _, brg := range bridges {
+		bgpInterface := getBgpRedirectIfaceName(brg.Bridge)
+		brgInterface := getBgpRedirectIfacePeerName(brg.Bridge)
+		mac := generateLrpMac(getLrpName(s, brg.Bridge))
 
 		// Add to virtual ethernet
 		// The BGP-side veth needs link-local: [ipv6] so that networkd
@@ -544,19 +535,19 @@ func generateVeth(ctx context.Context, s state.State, extConnections []types.Bgp
 
 // redirectBgp creates a port in OVS, moves it to the VRF specified by "tableID" and configures OVN to redirect
 // BGP+BFD traffic from the associated Logical Router Ports to the newly created ports.
-func redirectBgp(ctx context.Context, s state.State, extConnections []types.BgpExternalConnection, tableID string) error {
+func redirectBgp(ctx context.Context, s state.State, bridges []types.BgpBridge, tableID string) error {
 	vrfName := getVrfName(tableID)
 
-	err := generateVeth(ctx, s, extConnections, tableID)
+	err := generateVeth(ctx, s, bridges, tableID)
 	if err != nil {
 		return err
 	}
 
-	for _, extConnection := range extConnections {
-		lsName := getLsName(s, extConnection.Iface)
-		lrpName := getLrpName(s, extConnection.Iface)
-		brgIface := getBgpRedirectIfacePeerName(extConnection.Iface)
-		bgpIface := getBgpRedirectIfaceName(extConnection.Iface)
+	for _, brg := range bridges {
+		lsName := getLsName(s, brg.Bridge)
+		lrpName := getLrpName(s, brg.Bridge)
+		brgIface := getBgpRedirectIfacePeerName(brg.Bridge)
+		bgpIface := getBgpRedirectIfaceName(brg.Bridge)
 		bgpLsp := fmt.Sprintf("lsp-%s-%s", s.Name(), bgpIface)
 
 		// Create Logical Switch Port to which the BGP+BFD traffic will be redirected
