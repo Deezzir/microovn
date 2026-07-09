@@ -32,7 +32,7 @@ function ping_ovn_int_network_over_bgp_router() {
     # Start FRR in BGP peer container
     local tor_asn=4200000100
     echo "# Starting BGP in $BGP_PEER on interface $BGP_CONTAINER_INT_IFACE" >&3
-    frr_start_bgp_unnumbered "$BGP_PEER" "$BGP_CONTAINER_INT_IFACE" "$tor_asn"
+    frr_start_bgp_unnumbered "$BGP_PEER" "$tor_asn" "$BGP_CONTAINER_INT_IFACE"
 
     local host_asn=4210000000
     local vrf="10"

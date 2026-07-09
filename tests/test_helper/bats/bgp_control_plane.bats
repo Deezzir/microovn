@@ -119,7 +119,7 @@ bgp_unnumbered_peering() {
     for container in $BGP_PEERS; do
         tor_asn="$((tor_asn + 1))"
         echo "# Starting BGP in $container on interface $BGP_CONTAINER_IFACE" >&3
-        frr_start_bgp_unnumbered "$container" "$BGP_CONTAINER_IFACE" "$tor_asn"
+        frr_start_bgp_unnumbered "$container" "$tor_asn" "$BGP_CONTAINER_IFACE"
     done
 
     local host_asn=4210000000

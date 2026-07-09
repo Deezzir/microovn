@@ -20,41 +20,61 @@ function install_frr_bgp() {
         lxc_exec "$container" "systemctl restart frr"
     done
 }
-
-# frr_start_bgp_unnumbered CONTAINER INTERFACE ASN
-#
-# configure FRR installed via apt in the CONTAINER, to
-# start BGP in the unnumbered mode, listening on
-# the INTERFACE with ASN.
 function frr_start_bgp_unnumbered() {
     local container=$1; shift
-    local interface=$1; shift
     local asn=$1; shift
+    local interfaces=("$@")
 
-    cat << EOF | lxc_exec "$container" "vtysh"
-        configure
-        !
-        ip prefix-list accept-all seq 5 permit any
-        ipv6 prefix-list accept-all seq 5 permit any
-        !
-        router bgp $asn
-        neighbor $interface interface remote-as external
-        neighbor $interface bfd
-        !
-        address-family ipv4 unicast
-          neighbor $interface default-originate
-          neighbor $interface soft-reconfiguration inbound
-          neighbor $interface prefix-list accept-all in
-        exit-address-family
-        !
-        address-family ipv6 unicast
-          neighbor $interface default-originate
-          neighbor $interface soft-reconfiguration inbound
-          neighbor $interface activate
-          neighbor $interface prefix-list accept-all in
-        exit-address-family
-        !
+    {
+        cat <<EOF
+configure
+!
+ip prefix-list accept-all seq 5 permit any
+ipv6 prefix-list accept-all seq 5 permit any
+!
+router bgp $asn
 EOF
+
+        for interface in "${interfaces[@]}"; do
+            cat <<EOF
+ neighbor $interface interface remote-as external
+ neighbor $interface bfd
+EOF
+        done
+
+        cat <<EOF
+!
+ address-family ipv4 unicast
+EOF
+
+        for interface in "${interfaces[@]}"; do
+            cat <<EOF
+  neighbor $interface default-originate
+  neighbor $interface soft-reconfiguration inbound
+  neighbor $interface prefix-list accept-all in
+EOF
+        done
+
+        cat <<EOF
+ exit-address-family
+!
+ address-family ipv6 unicast
+EOF
+
+        for interface in "${interfaces[@]}"; do
+            cat <<EOF
+  neighbor $interface default-originate
+  neighbor $interface soft-reconfiguration inbound
+  neighbor $interface activate
+  neighbor $interface prefix-list accept-all in
+EOF
+        done
+
+        cat <<EOF
+ exit-address-family
+!
+EOF
+    } | lxc_exec "$container" "vtysh"
 }
 
 # generate_router_id STRING

@@ -32,18 +32,14 @@ function ping_ovn_int_network_over_bgp_router() {
     # Start FRR in BGP peer container
     local tor_asn=4200000100
     echo "# Starting BGP in $BGP_PEER on interface $BGP_CONTAINER_INT_IFACE" >&3
-    frr_start_bgp_unnumbered "$BGP_PEER" "$BGP_CONTAINER_INT_IFACE" "$tor_asn"
+    frr_start_bgp_unnumbered "$BGP_PEER" "$tor_asn" "$BGP_CONTAINER_INT_IFACE"
 
     # Enable BGP redirection and start BGP daemon in OVN chassis
-    local host_asn=4210000000
-    local vrf="10"
     local external_connections="$OVN_CONTAINER_INT_IFACE"
 
-    echo "# Enabling MicroOVN BGP in $TEST_CONTAINER and configuring BGP (ASN $host_asn)" >&3
+    echo "# Enabling MicroOVN BGP in $TEST_CONTAINER and configuring BGP" >&3
     lxc_exec "$TEST_CONTAINER" "microovn enable bgp \
-        --config ext_connection=$external_connections \
-        --config vrf=$vrf \
-        --config asn=$host_asn"
+        --config ext_connection=$external_connections"
 
     run lxc_exec "$TEST_CONTAINER" "cat /etc/netplan/90-microovn-bgp-veth.yaml"
 
