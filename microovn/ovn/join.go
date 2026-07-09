@@ -8,7 +8,9 @@ import (
 	"github.com/canonical/lxd/shared/logger"
 	"github.com/canonical/microcluster/v3/state"
 
+	bgpapi "github.com/canonical/microovn/microovn/api/bgp"
 	"github.com/canonical/microovn/microovn/api/types"
+	"github.com/canonical/microovn/microovn/config"
 	"github.com/canonical/microovn/microovn/database"
 	"github.com/canonical/microovn/microovn/node"
 	"github.com/canonical/microovn/microovn/ovn/certificates"
@@ -84,6 +86,19 @@ func Join(ctx context.Context, s state.State, initConfig map[string]string) erro
 		}
 	}
 
+	// Check BGP cluster setup requirements before enabling any services.
+	// This must happen early so a missing interface fails the join cleanly
+	// before partial state is committed.
+	bgpClusterItem, err := config.GetConfig(ctx, s, types.BgpConfigKeyCluster)
+	if err != nil {
+		return err
+	}
+	if bgpClusterItem != nil && bgpClusterItem.Value == "true" {
+		if err := bgpapi.CheckBgpInterfaceFromClusterConfig(ctx, s); err != nil {
+			return err
+		}
+	}
+
 	// Generate the configuration.
 	err = environment.GenerateEnvironment(ctx, s)
 	if err != nil {
@@ -156,6 +171,15 @@ func Join(ctx context.Context, s state.State, initConfig map[string]string) erro
 	err = dpu.DPUSetup(ctx, s)
 	if err != nil {
 		return err
+	}
+
+	if bgpClusterItem != nil && bgpClusterItem.Value == "true" {
+		logger.Infof("BGP cluster setup detected, enabling BGP on joining node")
+		err = bgpapi.EnableBgpOnNodeFromClusterConfig(ctx, s)
+		if err != nil {
+			logger.Errorf("Failed to enable BGP on joining node: %v", err)
+			return fmt.Errorf("failed to enable BGP on joining node: %w", err)
+		}
 	}
 
 	securitylog.Log(
