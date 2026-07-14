@@ -150,9 +150,9 @@ type BgpBridge struct {
 	Bridge string
 }
 
-// parseAsnRange parses an ASN range string in format "min-max".
+// ParseAsnRange parses an ASN range string in format "min-max".
 // Returns [2]uint64 array with [min, max] values, or an error if parsing fails.
-func parseAsnRange(asnRangeStr string) ([2]uint64, error) {
+func ParseAsnRange(asnRangeStr string) ([2]uint64, error) {
 	parts := strings.Split(asnRangeStr, "-")
 	if len(parts) != 2 {
 		return [2]uint64{}, fmt.Errorf("option 'asn_range' must be in format 'min-max': %s", asnRangeStr)
@@ -208,7 +208,7 @@ func (bgpConf *ExtraBgpConfig) FromMap(rawConfig map[string]string) error {
 			continue
 		}
 		if key == "asn_range" {
-			asnRange, err := parseAsnRange(value)
+			asnRange, err := ParseAsnRange(value)
 			if err != nil {
 				return err
 			}

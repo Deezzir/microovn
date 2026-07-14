@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"strconv"
-	"strings"
 
 	"github.com/canonical/microcluster/v3/microcluster"
 	"github.com/spf13/cobra"
@@ -68,7 +66,7 @@ func (c *cmdSetupBgp) Run(_ *cobra.Command, _ []string) error {
 	}
 
 	if c.asnRange != "" {
-		asnRange, err := parseSetupAsnRange(c.asnRange)
+		asnRange, err := types.ParseAsnRange(c.asnRange)
 		if err != nil {
 			return err
 		}
@@ -90,23 +88,4 @@ func (c *cmdSetupBgp) Run(_ *cobra.Command, _ []string) error {
 
 	fmt.Println(resp.Message)
 	return nil
-}
-
-func parseSetupAsnRange(asnRangeStr string) ([2]uint64, error) {
-	parts := strings.Split(asnRangeStr, "-")
-	if len(parts) != 2 {
-		return [2]uint64{}, fmt.Errorf("--asn_range must be in format 'min-max': %s", asnRangeStr)
-	}
-
-	min, err := strconv.ParseUint(parts[0], 10, 32)
-	if err != nil {
-		return [2]uint64{}, fmt.Errorf("--asn_range min value is not valid: %s", parts[0])
-	}
-
-	max, err := strconv.ParseUint(parts[1], 10, 32)
-	if err != nil {
-		return [2]uint64{}, fmt.Errorf("--asn_range max value is not valid: %s", parts[1])
-	}
-
-	return [2]uint64{min, max}, nil
 }
