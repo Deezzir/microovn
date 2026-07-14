@@ -40,7 +40,7 @@ const BgpBridgeMapping = "microovn-bgp-bridge-mapping"
 // the Open_vSwitch table in the OVS database. It returns default value 'br-int' if the
 // key does not exist in external-ids.
 func getOvnIntegrationBridge(ctx context.Context, s state.State) (string, error) {
-	brName, err := vsctlGetIfExists(ctx, s, "Open_vSwitch", ".", "external-ids", "ovn-bridge")
+	brName, err := VsctlGetIfExists(ctx, s, "Open_vSwitch", ".", "external-ids", "ovn-bridge")
 	if brName == "" {
 		brName = "br-int"
 	}
@@ -151,11 +151,11 @@ func generateAsnFromClusterMemberID(ctx context.Context, s state.State, asnRange
 	return fmt.Sprintf("%d", asn), nil
 }
 
-// vsctlGetIfExists runs 'ovs-vsctl' get to retrieve record [column [key]] from the
+// VsctlGetIfExists runs 'ovs-vsctl' get to retrieve record [column [key]] from the
 // specified table. Returned string has whitespace and quotations trimmed.
 // If the 'ovs-vsctl' command failed due to the "key" not being found in "column",
 // this function returns empty string without error.
-func vsctlGetIfExists(ctx context.Context, s state.State, table string, record string, column string, key string) (string, error) {
+func VsctlGetIfExists(ctx context.Context, s state.State, table string, record string, column string, key string) (string, error) {
 	args := []string{"get", table, record}
 	if column != "" {
 		if key != "" {
@@ -293,7 +293,7 @@ func createExternalBridges(ctx context.Context, s state.State, bridges []types.B
 	for _, extConnection := range bridges {
 		bridgeName := fmt.Sprintf("br-%s", extConnection.Iface)
 		physnet := getPhysnetName(s, bridgeName)
-		bridgeMap, err := vsctlGetIfExists(ctx, s, "Open_vSwitch", ".", "external-ids", "ovn-bridge-mappings")
+		bridgeMap, err := VsctlGetIfExists(ctx, s, "Open_vSwitch", ".", "external-ids", "ovn-bridge-mappings")
 		if err != nil {
 			return nil, fmt.Errorf("failed to lookup ovn-bridge-mappings: %v", err)
 		}
@@ -327,7 +327,7 @@ func createExternalBridges(ctx context.Context, s state.State, bridges []types.B
 }
 
 func createBridgeNetworks(ctx context.Context, s state.State, bridges []types.BgpBridge) ([]types.BgpBridge, error) {
-	bridgeMap, err := vsctlGetIfExists(ctx, s, "Open_vSwitch", ".", "external-ids", "ovn-bridge-mappings")
+	bridgeMap, err := VsctlGetIfExists(ctx, s, "Open_vSwitch", ".", "external-ids", "ovn-bridge-mappings")
 	if err != nil {
 		return nil, fmt.Errorf("failed to lookup ovn-bridge-mappings: %v", err)
 	}
@@ -665,13 +665,13 @@ func teardownAll(ctx context.Context, s state.State) error {
 	}
 
 	// Cleanup ovn-bridge mappings for external networks
-	ovnBridgeMapping, err := vsctlGetIfExists(ctx, s, "Open_vSwitch", ".", "external-ids", "ovn-bridge-mappings")
+	ovnBridgeMapping, err := VsctlGetIfExists(ctx, s, "Open_vSwitch", ".", "external-ids", "ovn-bridge-mappings")
 	if err != nil {
 		allErrors = errors.Join(allErrors, fmt.Errorf("failed to lookup Open_vSwitch ovn-bridge-mappings: %v", err))
 		return allErrors
 	}
 
-	microOvnBridgeMapping, err := vsctlGetIfExists(ctx, s, "Open_vSwitch", ".", "external-ids", BgpBridgeMapping)
+	microOvnBridgeMapping, err := VsctlGetIfExists(ctx, s, "Open_vSwitch", ".", "external-ids", BgpBridgeMapping)
 	if err != nil {
 		allErrors = errors.Join(allErrors, fmt.Errorf("failed to lookup OVN bridge mapping managed by MicroOVN: %v", err))
 	} else if len(ovnBridgeMapping) != 0 && len(microOvnBridgeMapping) != 0 {
