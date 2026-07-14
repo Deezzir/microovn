@@ -853,3 +853,101 @@ function setup_snap_aliases(){
         done
     done
 }
+
+# Build a YAML string for the preseed file from given parameters.
+# Arguments:
+#   $1 - name
+#   $2 - address
+#   $3 - custom_encapsulation_ip (optional)
+#   $4 - user_ca_crt (optional)
+#   $5 - user_ca_key (optional)
+#   $6 - services (optional)
+# Returns the YAML content to stdout.
+function microovn_preseed_bootstrap_yaml() {
+    local name=$1; shift
+    local address=$1; shift
+    local custom_encapsulation_ip=$1; shift
+    local user_ca_crt=$1; shift
+    local user_ca_key=$1; shift
+    local services=$1; shift
+
+    echo "mode: bootstrap"
+    echo "name: \"$name\""
+    if [ -n "$address" ]; then
+        echo "address: \"$address\""
+    fi
+    if [ -n "$services" ]; then
+        echo "services: \"$services\""
+    fi
+    if [ -n "$custom_encapsulation_ip" ]; then
+        echo "custom_encapsulation_ip: \"$custom_encapsulation_ip\""
+    fi
+    if [ -n "$user_ca_crt" ]; then
+        echo "custom_ca_cert: \"$user_ca_crt\""
+    fi
+    if [ -n "$user_ca_key" ]; then
+        echo "custom_ca_key: \"$user_ca_key\""
+    fi
+}
+
+# Build a YAML string for the preseed join configuration.
+# Arguments:
+#   $1 - address
+#   $2 - token
+#   $3 - custom_encapsulation_ip (optional)
+#   $4 - services (optional)
+# Returns the YAML content to stdout.
+function microovn_preseed_join_yaml() {
+    local address=$1; shift
+    local token=$1; shift
+    local custom_encapsulation_ip=$1; shift
+    local services=$1; shift
+
+    echo "mode: join"
+    echo "token: \"$token\""
+    if [ -n "$address" ]; then
+        echo "address: \"$address\""
+    fi
+    if [ -n "$services" ]; then
+        echo "services: \"$services\""
+    fi
+    if [ -n "$custom_encapsulation_ip" ]; then
+        echo "custom_encapsulation_ip: \"$custom_encapsulation_ip\""
+    fi
+}
+
+# Run 'microovn init' with a preseed YAML piped through stdin.
+# Arguments:
+#   $1       - container name
+#   stdin    - YAML preseed content
+function microovn_init_preseed() {
+    local container=$1; shift
+
+    lxc exec "$container" -- bash -c "sudo microovn init"
+}
+
+# microovn_init_create_cluster_preseed CONTAINER ADDRESS [CUSTOM_ENCAP_IP] [CA_CRT] [CA_KEY] [SERVICES]
+function microovn_init_create_cluster_preseed() {
+    local container=$1; shift
+    local address=$1; shift
+    local custom_encapsulation_ip=$1; shift
+    local user_ca_crt=$1; shift
+    local user_ca_key=$1; shift
+    local services=$1; shift
+
+    microovn_preseed_bootstrap_yaml "$container" "$address" \
+        "$custom_encapsulation_ip" "$user_ca_crt" "$user_ca_key" \
+        "$services" | microovn_init_preseed "$container"
+}
+
+# microovn_init_join_cluster_preseed CONTAINER ADDRESS TOKEN [CUSTOM_ENCAP_IP] [SERVICES]
+function microovn_init_join_cluster_preseed() {
+    local container=$1; shift
+    local address=$1; shift
+    local token=$1; shift
+    local custom_encapsulation_ip=$1; shift
+    local services=$1; shift
+
+    microovn_preseed_join_yaml "$address" "$token" \
+        "$custom_encapsulation_ip" "$services" | microovn_init_preseed "$container"
+}
