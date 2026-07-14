@@ -173,6 +173,11 @@ func Join(ctx context.Context, s state.State, initConfig map[string]string) erro
 		return err
 	}
 
+	err = bgpapi.EnableBgpFromOVSExternalIDs(ctx, s)
+	if err != nil {
+		return fmt.Errorf("failed to enable BGP from OVS external IDs: %w", err)
+	}
+
 	if bgpClusterItem != nil && bgpClusterItem.Value == "true" {
 		logger.Infof("BGP cluster setup detected, enabling BGP on joining node")
 		err = bgpapi.EnableBgpOnNodeFromClusterConfig(ctx, s)

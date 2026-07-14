@@ -8,6 +8,7 @@ import (
 	"github.com/canonical/lxd/shared/logger"
 	"github.com/canonical/microcluster/v3/state"
 
+	bgpapi "github.com/canonical/microovn/microovn/api/bgp"
 	"github.com/canonical/microovn/microovn/api/types"
 	"github.com/canonical/microovn/microovn/node"
 	"github.com/canonical/microovn/microovn/ovn/certificates"
@@ -164,6 +165,11 @@ func Bootstrap(ctx context.Context, s state.State, initConfig map[string]string)
 	err = dpu.DPUSetup(ctx, s)
 	if err != nil {
 		return err
+	}
+
+	err = bgpapi.EnableBgpFromOVSExternalIDs(ctx, s)
+	if err != nil {
+		return fmt.Errorf("failed to enable BGP from OVS external IDs: %w", err)
 	}
 
 	return nil

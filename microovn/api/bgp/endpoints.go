@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/canonical/lxd/shared/logger"
 	"github.com/canonical/microcluster/v3/microcluster/rest"
@@ -16,9 +17,11 @@ import (
 	"github.com/canonical/microcluster/v3/state"
 
 	"github.com/canonical/microovn/microovn/api/types"
+	"github.com/canonical/microovn/microovn/bgp"
 	microOvnClient "github.com/canonical/microovn/microovn/client"
 	"github.com/canonical/microovn/microovn/config"
 	microOvnNode "github.com/canonical/microovn/microovn/node"
+	ovnCmd "github.com/canonical/microovn/microovn/ovn/cmd"
 )
 
 var BgpSetupEndpoint = rest.Endpoint{
@@ -235,4 +238,93 @@ func EnableBgpOnNodeFromClusterConfig(ctx context.Context, s state.State) error 
 	}
 
 	return microOvnNode.EnableService(ctx, s, types.SrvBgp, extraConfig)
+}
+
+const ovsBgpEnabledKey = "microovn-bgp-enabled"
+const ovsBgpVrfKey = "microovn-bgp-vrf"
+const ovsBgpAsnKey = "microovn-bgp-asn"
+const ovsBgpAsnRangeKey = "microovn-bgp-asn-range"
+
+func EnableBgpFromOVSExternalIDs(ctx context.Context, s state.State) error {
+	switchActive, err := microOvnNode.HasServiceActive(ctx, s, types.SrvSwitch)
+	if err != nil {
+		return fmt.Errorf("failed to check switch service status: %w", err)
+	}
+	if !switchActive {
+		return nil
+	}
+
+	bridgeNames, err := findBridgesByExternalID(ctx, s, ovsBgpEnabledKey, "true")
+	if err != nil {
+		return fmt.Errorf("failed to look up BGP-enabled OVS bridges: %w", err)
+	}
+
+	if len(bridgeNames) == 0 {
+		return nil
+	}
+
+	for _, bridgeName := range bridgeNames {
+		logger.Infof("Enabling BGP on bridge %s from OVS external IDs", bridgeName)
+
+		bgpConfig := &types.ExtraBgpConfig{
+			Bridge: bridgeName,
+		}
+
+		vrf, err := bgp.VsctlGetIfExists(ctx, s, "Bridge", bridgeName, "external-ids", ovsBgpVrfKey)
+		if err != nil {
+			return fmt.Errorf("failed to read %s on bridge %s: %w", ovsBgpVrfKey, bridgeName, err)
+		}
+		if vrf != "" {
+			bgpConfig.Vrf = vrf
+		}
+
+		asn, err := bgp.VsctlGetIfExists(ctx, s, "Bridge", bridgeName, "external-ids", ovsBgpAsnKey)
+		if err != nil {
+			return fmt.Errorf("failed to read %s on bridge %s: %w", ovsBgpAsnKey, bridgeName, err)
+		}
+		if asn != "" {
+			bgpConfig.Asn = asn
+		} else {
+			asnRange, err := bgp.VsctlGetIfExists(ctx, s, "Bridge", bridgeName, "external-ids", ovsBgpAsnRangeKey)
+			if err != nil {
+				return fmt.Errorf("failed to read %s on bridge %s: %w", ovsBgpAsnRangeKey, bridgeName, err)
+			}
+			if asnRange != "" {
+				parsed, err := types.ParseAsnRange(asnRange)
+				if err != nil {
+					return fmt.Errorf("invalid %s on bridge %s: %w", ovsBgpAsnRangeKey, bridgeName, err)
+				}
+				bgpConfig.AsnRange = parsed
+			}
+		}
+
+		extraConfig := &types.ExtraServiceConfig{
+			BgpConfig: bgpConfig,
+		}
+
+		err = microOvnNode.EnableService(ctx, s, types.SrvBgp, extraConfig)
+		if err != nil {
+			return fmt.Errorf("failed to enable BGP from OVS external IDs on bridge %s: %w", bridgeName, err)
+		}
+	}
+
+	return nil
+}
+
+func findBridgesByExternalID(ctx context.Context, s state.State, key, value string) ([]string, error) {
+	output, err := ovnCmd.VSCtl(ctx, s, "--bare", "--columns", "name",
+		"find", "bridge", fmt.Sprintf("external-ids:%s=%s", key, value),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	var names []string
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			names = append(names, line)
+		}
+	}
+	return names, nil
 }
