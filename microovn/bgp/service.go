@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/template"
 
 	"github.com/canonical/lxd/shared"
@@ -21,18 +22,21 @@ const BirdService = "bird"
 
 // birdTemplateInput - input data for the birdConfTemplate
 type birdTemplateInput struct {
-	VrfTableID     string
-	VrfName        string
-	RouterID       string
-	ExtConnections []types.BgpExternalConnection
-	ASN            string
+	VrfTableID string
+	VrfName    string
+	RouterID   string
+	Bridges    []types.BgpBridge
+	ASN        string
 }
 
 // birdConfTemplate - a template of a Bird configuration file that enables BGP daemon in dynamic
 // mode on specified interfaces.
 var birdConfTemplate = template.Must(
 	template.New("bird.conf").
-		Funcs(template.FuncMap{"ifaceName": getBgpRedirectIfaceName}).
+		Funcs(template.FuncMap{
+			"ifaceName": getBgpRedirectIfaceName,
+			"birdName":  func(s string) string { return strings.ReplaceAll(s, "-", "_") },
+		}).
 		Parse(`
 log syslog all;
 protocol device {};
@@ -84,14 +88,14 @@ filter no_default_v6 {
 	if net = ::/0 then reject;
 	accept;
 }
-{{ range .ExtConnections }}
-protocol bgp microovn_{{ .Iface }} {
+{{ range .Bridges}}
+protocol bgp microovn_{{ birdName .Bridge }} {
 	router id {{ $.RouterID }};
-	interface "{{ ifaceName .Iface }}";
+	interface "{{ ifaceName .Bridge }}";
 	vrf "{{ $.VrfName }}";
 	local as {{ $.ASN }};
 	neighbor range fe80::/10 external;
-	dynamic name "dyn_microovn_{{ .Iface }}_";
+	dynamic name "dyn_microovn_{{ birdName .Bridge }}_";
 	ipv4 {
 		next hop self ebgp;
 		extended next hop on;
@@ -149,22 +153,36 @@ func EnableService(ctx context.Context, s state.State, extraConfig *types.ExtraB
 		logging.Debugf("Auto-selected VRF table ID: %s", vrfTableID)
 	}
 
-	err = createExternalBridges(ctx, s, extConnections)
+	cfgBridges, err := extraConfig.ParseBridge()
+	if err != nil {
+		logging.Errorf("Failed to parse bridges: %v", err)
+	}
+
+	var bridges []types.BgpBridge
+	if len(cfgBridges) == 0 {
+		bridges, err = createExternalBridges(ctx, s, extConnections)
+		if err != nil {
+			return errors.Join(err, DisableService(ctx, s))
+		}
+	} else {
+		bridges, err = createBridgeNetworks(ctx, s, cfgBridges)
+		if err != nil {
+			return errors.Join(err, DisableService(ctx, s))
+		}
+
+	}
+
+	err = createExternalNetworks(ctx, s, bridges)
 	if err != nil {
 		return errors.Join(err, DisableService(ctx, s))
 	}
 
-	err = createExternalNetworks(ctx, s, extConnections)
+	err = createVrf(ctx, s, bridges, vrfTableID)
 	if err != nil {
 		return errors.Join(err, DisableService(ctx, s))
 	}
 
-	err = createVrf(ctx, s, extConnections, vrfTableID)
-	if err != nil {
-		return errors.Join(err, DisableService(ctx, s))
-	}
-
-	err = redirectBgp(ctx, s, extConnections, vrfTableID)
+	err = redirectBgp(ctx, s, bridges, vrfTableID)
 	if err != nil {
 		return errors.Join(err, DisableService(ctx, s))
 	}
@@ -193,7 +211,7 @@ func EnableService(ctx context.Context, s state.State, extraConfig *types.ExtraB
 		logging.Debugf("Auto-selected ASN: %s", asn)
 	}
 
-	err = configureBirdBgp(ctx, s, extConnections, vrfTableID, asn)
+	err = configureBirdBgp(ctx, s, bridges, vrfTableID, asn)
 	if err != nil {
 		return errors.Join(err, DisableService(ctx, s))
 	}
@@ -224,7 +242,7 @@ func DisableService(ctx context.Context, s state.State) error {
 // Each BGP daemon is connected to the VRF table specified by "tableID". It will announce routes from the VRF
 // to its peers, and it will insert routes announced by its peers into the same VRF.
 // All BGP daemons will be configured with the provided local ASN.
-func configureBirdBgp(ctx context.Context, s state.State, extConnections []types.BgpExternalConnection, tableID string, asn string) error {
+func configureBirdBgp(ctx context.Context, s state.State, bridges []types.BgpBridge, tableID string, asn string) error {
 	vrfName := getVrfName(tableID)
 
 	configFile, err := os.OpenFile(paths.BirdConfigFile(), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0644)
@@ -233,11 +251,11 @@ func configureBirdBgp(ctx context.Context, s state.State, extConnections []types
 	}
 
 	err = birdConfTemplate.Execute(configFile, birdTemplateInput{
-		VrfTableID:     tableID,
-		VrfName:        vrfName,
-		RouterID:       generateBGPRouterID(getLrpName(s, extConnections[0].Iface)),
-		ExtConnections: extConnections,
-		ASN:            asn,
+		VrfTableID: tableID,
+		VrfName:    vrfName,
+		RouterID:   generateBGPRouterID(getLrpName(s, bridges[0].Bridge)),
+		Bridges:    bridges,
+		ASN:        asn,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to render Bird configuration template: %w", err)

@@ -6,6 +6,7 @@ import (
 	"github.com/canonical/microovn/microovn/api/config"
 	"github.com/canonical/microovn/microovn/api/ovsdb"
 
+	bgpapi "github.com/canonical/microovn/microovn/api/bgp"
 	"github.com/canonical/microovn/microovn/api/certificates"
 	"github.com/canonical/microovn/microovn/api/services"
 	"github.com/canonical/microovn/microovn/api/types"
@@ -30,6 +31,8 @@ var Server = map[string]rest.Server{
 					ovsdb.AllExpectedSchemaVersions,
 					ovsdb.ExpectedSchemaVersion,
 					config.ConfigEndoint,
+					bgpapi.BgpSetupEndpoint,
+					bgpapi.BgpCheckInterfaceEndpoint,
 				},
 			},
 		},

@@ -34,12 +34,15 @@ function ping_ovn_int_network_over_bgp_router() {
     echo "# Starting BGP in $BGP_PEER on interface $BGP_CONTAINER_INT_IFACE" >&3
     frr_start_bgp_unnumbered "$BGP_PEER" "$tor_asn" "$BGP_CONTAINER_INT_IFACE"
 
-    # Enable BGP redirection and start BGP daemon in OVN chassis
-    local external_connections="$OVN_CONTAINER_INT_IFACE"
-
-    echo "# Enabling MicroOVN BGP in $TEST_CONTAINER and configuring BGP" >&3
-    lxc_exec "$TEST_CONTAINER" "microovn enable bgp \
-        --config ext_connection=$external_connections"
+    echo "# starting microovn.switch $TEST_CONTAINER and setting up br0" >&3
+    run lxc_exec "$TEST_CONTAINER" "snap start microovn.switch"
+    sleep 1
+    lxc_exec "$TEST_CONTAINER" "ovs-vsctl add-br br0"
+    lxc_exec "$TEST_CONTAINER" "ovs-vsctl set Bridge br0 external-ids:microovn-bgp-enabled=true"
+    lxc_exec "$TEST_CONTAINER" "ovs-vsctl --bare --columns name find bridge external-ids:microovn-bgp-enabled=true"
+    lxc_exec "$TEST_CONTAINER" "ovs-vsctl add-port br0 $OVN_CONTAINER_INT_IFACE"
+    echo "# Bootstrapping cluster which should enable MicroOVN BGP in $TEST_CONTAINER and configuring BGP" >&3
+    bootstrap_cluster $TEST_CONTAINER
 
     run lxc_exec "$TEST_CONTAINER" "cat /etc/netplan/90-microovn-bgp-veth.yaml"
 
@@ -47,29 +50,30 @@ function ping_ovn_int_network_over_bgp_router() {
 network:
     version: 2
     virtual-ethernets:
-        vbr-eth1-bgp:
-            peer: vbr-eth1-brg
-            macaddress: 02:de:8d:e4:ef:1d
+        vbr0-bgp:
+            peer: vbr0-brg
+            macaddress: 02:e7:e4:6d:34:b5
             accept-ra: false
             link-local:
                 - ipv6
-        vbr-eth1-brg:
-            peer: vbr-eth1-bgp
+        vbr0-brg:
+            peer: vbr0-bgp
             accept-ra: false
     vrfs:
         ovnvrf10:
             table: "10"
             interfaces:
-                - vbr-eth1-bgp
+                - vbr0-bgp
     bridges:
         br-int:
             openvswitch:
                 fail-mode: secure
             interfaces:
-                - vbr-eth1-brg
+                - vbr0-brg
     openvswitch:
         external-ids:
-            dynamic-routing-port-mapping: vbr-eth1-bgp=vbr-eth1-bgp
+            dynamic-routing-port-mapping: vbr0-bgp=vbr0-bgp
+
 EOF
 )
     assert_output "$expected"
@@ -144,10 +148,10 @@ EOF
 
     # XXX potential bug?
     echo "# ($BGP_PEER) Ensure OVN performs ND for its default gateway" >&3
-    lxc_exec "$BGP_PEER" "ping -W 1 -c 3 fe80::de:8dff:fee4:ef1d%eth1 || true"
+    lxc_exec "$BGP_PEER" "ping -W 1 -c 3 fe80::6c:6dff:fea9:5a90 || true"
 
     echo "# Wait for Mac_Binding to be populated for the LRs default gateway" >&3
-    wait_until "microovn_mac_binding_exists $TEST_CONTAINER $neighbor_address lrp-microovn-bgp-data-plane-1-br-eth1"
+    wait_until "microovn_mac_binding_exists $TEST_CONTAINER $neighbor_address lrp-$TEST_CONTAINER-br0"
 
     # Check that external host can reach NAT address
     echo "# ($EXT_HOST) Reach NAT address $nat_ext_ip with ping" >&3

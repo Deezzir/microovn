@@ -265,3 +265,14 @@ func DeleteConfig(ctx context.Context, c microTypes.Client, key string) (types.D
 
 	return responseData, err
 }
+
+// SetupBgp sends a request to set up BGP across all nodes in the cluster.
+func SetupBgp(ctx context.Context, c microTypes.Client, request types.SetupBgpRequest) (types.SetupBgpResponse, error) {
+	queryCtx, cancel := context.WithTimeout(ctx, time.Second*120)
+	defer cancel()
+
+	responseData := types.SetupBgpResponse{}
+	err := c.Query(queryCtx, "POST", types.APIVersion, &url.URL{Path: "bgp/setup"}, request, &responseData)
+
+	return responseData, err
+}
